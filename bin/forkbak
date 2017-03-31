@@ -62,7 +62,7 @@ module Forkbak
         end
       rescue URI::InvalidURIError => e
         puts "still waiting: #{e.class}: #{e.message}"
-        puts {uri: self.database_url(config_var), config_var: config_var}.inspect
+        puts({uri: self.database_url(config_var), config_var: config_var}.inspect)
       rescue =>e
         puts "still waiting: #{e.class}: #{e.message}"
       ensure
