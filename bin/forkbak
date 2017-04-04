@@ -153,6 +153,7 @@ def run
   Forkbak.destroy_databases
   puts "Creating database"
   db = Forkbak.create_database
+  puts db.inspect
   begin
     puts "Waiting for database to become available"
     Forkbak.wait_for_database(db['config_vars'].first)
