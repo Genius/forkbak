@@ -25,31 +25,34 @@ module Forkbak
     })
   end
 
-  def self.database_url(config_var)
+  def self.database_url(db_name)
+    return unless addon = heroku.addon.list(ENV['APP']).find {|a| a['name'] == db_name }
+    return unless config_var = addon['config_vars'].first
+
     heroku.config_var.info(ENV.fetch('APP'))[config_var]
   end
 
-  def self.wait_for_database(config_var)
+  def self.wait_for_database(db_name)
     loop do
       begin
-        resolved_database_url = self.database_url(config_var)
+        if resolved_database_url = database_url(db_name)
+          url = URI.parse(resolved_database_url)
+          host = url.host
+          host = host.gsub(/%2F/i, '/') if host
 
-        url = URI.parse(resolved_database_url)
-        host = url.host
-        host = host.gsub(/%2F/i, '/') if host
-
-        params = [
-          host,
-          url.port || 5432,
-          nil, '',
-          url.path.gsub("/",""),
-          url.user,
-          url.password
-        ]
-        conn = PG::Connection.open(*params)
-        result = conn.exec("SELECT pg_is_in_recovery()").values
-        break if result[0][0] == 'f'
-        puts "still waiting, pg is in recovery"
+          params = [
+            host,
+            url.port || 5432,
+            nil, '',
+            url.path.gsub("/",""),
+            url.user,
+            url.password
+          ]
+          conn = PG::Connection.open(*params)
+          result = conn.exec("SELECT pg_is_in_recovery()").values
+          break if result[0][0] == 'f'
+          puts "still waiting, pg is in recovery"
+        end
       rescue PG::ConnectionBad => e
         if e.message =~ /Is the server running on host|the database system is starting up|could not connect to server/
           puts "DB preparing"
@@ -62,7 +65,7 @@ module Forkbak
         end
       rescue URI::InvalidURIError => e
         puts "still waiting: #{e.class}: #{e.message}"
-        puts {uri: self.database_url(config_var), config_var: config_var}.inspect
+        puts({uri: self.database_url(db_name), db_name: db_name}.inspect)
       rescue =>e
         puts "still waiting: #{e.class}: #{e.message}"
       ensure
@@ -72,8 +75,8 @@ module Forkbak
     end
   end
 
-  def self.create_backup(db)
-    pgbackups = Forkbak::PGBackupsClient.new(db: db)
+  def self.create_backup(db_name)
+    pgbackups = Forkbak::PGBackupsClient.new(db_name: db_name)
     loop do
       if transfer_id = pgbackups.transfer!
         return transfer_id
@@ -84,8 +87,8 @@ module Forkbak
     end
   end
 
-  def self.wait_for_backup(db, transfer_id)
-    pgbackups = Forkbak::PGBackupsClient.new(db: db, transfer_id: transfer_id)
+  def self.wait_for_backup(db_name, transfer_id)
+    pgbackups = Forkbak::PGBackupsClient.new(db_name: db_name, transfer_id: transfer_id)
     until pgbackups.transfer_status == Forkbak::PGBackupsClient::StatusCompleted
       putc '.'
       sleep 10
@@ -105,14 +108,14 @@ end
 module Forkbak
   class PGBackupsClient
     def initialize(opts)
-      @db          = opts.fetch(:db)
+      @db_name     = opts.fetch(:db_name)
       @transfer_id = opts[:transfer_id]
     end
 
     def transfer!
 
       response = JSON.parse(
-        restclient_resource["/client/v11/databases/#{@db['name']}/backups"]
+        restclient_resource["/client/v11/databases/#{@db_name}/backups"]
           .post(expire: true)
       )
       @transfer_id = response['uuid']
@@ -123,7 +126,7 @@ module Forkbak
 
     def transfer_status
       response = JSON.parse(
-        restclient_resource["/client/v11/databases/#{@db['name']}/transfers/#{@transfer_id}"].get
+        restclient_resource["/client/v11/databases/#{@db_name}/transfers/#{@transfer_id}"].get
       )
       if response['errors']
         StatusError
@@ -152,14 +155,15 @@ def run
   puts "Cleaning up leftover DBs"
   Forkbak.destroy_databases
   puts "Creating database"
-  db = Forkbak.create_database
+  db_name = Forkbak.create_database['name']
+  puts db_name.inspect
   begin
     puts "Waiting for database to become available"
-    Forkbak.wait_for_database(db['config_vars'].first)
+    Forkbak.wait_for_database(db_name)
     puts "Creating backup"
-    transfer_id = Forkbak.create_backup(db)
+    transfer_id = Forkbak.create_backup(db_name)
     puts "Waiting for backup to complete (#{transfer_id})"
-    Forkbak.wait_for_backup(db, transfer_id)
+    Forkbak.wait_for_backup(db_name, transfer_id)
   rescue => e
     puts "Failed to take backup: #{e.class} - #{e.message}\n\n#{e.backtrace.join("\n")}"
   ensure
