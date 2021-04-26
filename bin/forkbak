@@ -15,7 +15,7 @@ module Forkbak
   end
 
   def self.create_database
-    database_to_fork = heroku.config_var.info(ENV.fetch('FORK_FROM_APP'))['DATABASE_URL']
+    database_to_fork = heroku.config_var.info_for_app(ENV.fetch('FORK_FROM_APP'))['DATABASE_URL']
     heroku.addon.create(ENV['APP'], {
       plan: "heroku-postgresql:standard-5",
       config: {
@@ -26,10 +26,10 @@ module Forkbak
   end
 
   def self.database_url(db_name)
-    return unless addon = heroku.addon.list(ENV['APP']).find {|a| a['name'] == db_name }
+    return unless addon = heroku.addon.list_by_app(ENV['APP']).find {|a| a['name'] == db_name }
     return unless config_var = addon['config_vars'].first
 
-    heroku.config_var.info(ENV.fetch('APP'))[config_var]
+    heroku.config_var.info_for_app(ENV.fetch('APP'))[config_var]
   end
 
   def self.wait_for_database(db_name)
@@ -97,7 +97,7 @@ module Forkbak
   end
 
   def self.destroy_databases
-    heroku.addon.list(ENV.fetch('APP')).select do |addon|
+    heroku.addon.list_by_app(ENV.fetch('APP')).select do |addon|
       addon['addon_service']['name'] == 'heroku-postgresql'
     end.each do |addon|
       heroku.addon.delete(ENV.fetch('APP'), addon['name'])
@@ -150,7 +150,7 @@ module Forkbak
   end
 end
 
-def run
+def run_old_method
   start = Time.now
   puts "Cleaning up leftover DBs"
   Forkbak.destroy_databases
@@ -170,6 +170,18 @@ def run
     puts "Done, took #{Time.now - start}"
     Forkbak.destroy_databases
   end
+end
+
+def run
+  puts 'Testing heroku api'
+  h = Forkbak.heroku
+
+  database_to_fork = h.config_var.info_for_app(ENV.fetch('FORK_FROM_APP'))['DATABASE_URL']
+  puts "Database to fork: #{database_to_fork}"
+
+  addons = h.addon.list_by_app(ENV['APP'])
+  puts "List addons for #{ENV['APP']}"
+  puts addons
 end
 
 run
