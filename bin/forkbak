@@ -150,7 +150,7 @@ module Forkbak
   end
 end
 
-def run_old_method
+def run
   start = Time.now
   puts "Cleaning up leftover DBs"
   Forkbak.destroy_databases
@@ -170,18 +170,6 @@ def run_old_method
     puts "Done, took #{Time.now - start}"
     Forkbak.destroy_databases
   end
-end
-
-def run
-  puts 'Testing heroku api'
-  h = Forkbak.heroku
-
-  database_to_fork = h.config_var.info_for_app(ENV.fetch('FORK_FROM_APP'))['DATABASE_URL']
-  puts "Database to fork: #{database_to_fork}"
-
-  addons = h.addon.list_by_app(ENV['APP'])
-  puts "List addons for #{ENV['APP']}"
-  puts addons
 end
 
 run
